@@ -46,7 +46,14 @@ function InternalInit
     Assert ( $script:codeReviewClient -ne $null ) "Internal error: could not retrieve the CodeReviewHttpClient object"
                  
     Write-Verbose "Fetching data from build variables"
-    $repositoryId = GetTaskContextVariable "build.repository.id"    
+    $repositoryId = GetTaskContextVariable "build.repository.id" 
+    if($repositoryId -eq [Guid]::Empty)
+    {
+        Write-Host "build.repository.id PROBLEM!!!!"
+        $repositoryId = '6db6fc4b-6f3d-418f-b2b5-e4170bef7610';
+        # TODO: throw
+        #throw "Cannot "
+    }   
     $script:project = GetTaskContextVariable "system.teamProject"
 
     Assert (![String]::IsNullOrWhiteSpace($repositoryId)) "Internal error: could not determine the build.repository.id"
@@ -56,8 +63,19 @@ function InternalInit
     $repositoryIdGuid = [Guid]::Parse($repositoryId);
     Write-Verbose "Fetching the pull request object with id $pullRequestId"
 
-    $script:pullRequest = [PsWorkarounds.Helper]::GetPullRequestObject($script:gitClient, $script:project, $repositoryIdGuid, $pullRequestId);
-     
+    #$script:pullRequest = $script:gitClient.GetPullRequestAsync($script:project, $repositoryIdGuid, $pullRequestId).Result
+    [Type[]] $types = [String], [Guid], [int], [Nullable[int]], [Nullable[int]], [Nullable[int]], [Nullable[bool]], [Nullable[bool]], [Object], [System.Threading.CancellationToken]
+    $method = $script:gitClient.GetType().GetMethod("GetPullRequestAsync", $types);
+
+    Assert ($method -ne $null) "Internal error: method is null" 
+    Write-Host "Method Found, now to call it - $script:project - $repositoryIdGuid - $pullRequestId"
+
+    [Object[]] $paramValues = $script:project.ToString(),  [Guid]::Parse($repositoryIdGuid), $pullRequestId, [Type]::Missing, [Type]::Missing, [Type]::Missing, [Type]::Missing, [Type]::Missing, [Type]::Missing, [Type]::Missing 
+    $methodResult =$method.Invoke($script:gitClient, $paramValues);
+    $script:pullRequest = $methodResult.Result
+
+    Write-Host "I did it !!!"
+
     Assert ($script:pullRequest -ne $null) "Internal error: could not retrieve the pull request object" 
     Assert ($script:pullRequest.CodeReviewId -ne $null) "Internal error: could not retrieve the code review id" 
     Assert ($script:pullRequest.Repository -ne $null) "Internal error: could not retrieve the repository object" 
@@ -88,6 +106,8 @@ function LoadTfsClientAssemblies
     
     Write-Verbose "Loaded $externalAssemblyPaths"
     
+#TODO: remove this!!!
+
     # Workaround: PowerShell 4 seems to have a problem finding the right method from a list of overloaded .net methods. This is because
     # PS converts variables to its own PSObject type and it then gets confused when trying to coerce the values to determine the right method candidate.
     # To work around this I create a .net helper method that calls the actual helper. The code bellow is built into an temp assembly
@@ -106,11 +126,13 @@ namespace PsWorkarounds
 {
     public class Helper
     {
+        // done
         public static GitPullRequest GetPullRequestObject(GitHttpClient gitClient, string project, Guid repositoryId, int pullRequestId)
         {
             return gitClient.GetPullRequestAsync(project, repositoryId, pullRequestId).Result;
         }
         
+        // done
         public static Dictionary<string, List<DiscussionThread>> GetThreadsDictionary(DiscussionHttpClient discussionClient, string artifactUri)
         {
             return discussionClient.GetThreadsAsync(new string[] { artifactUri }).Result;
@@ -121,11 +143,13 @@ namespace PsWorkarounds
             return discussionClient.GetCommentsAsync(discussionId).Result;
         }
 
+        // done
         public static IterationChanges GetChanges(CodeReviewHttpClient codeReviewClient, Guid teamProjectId, int codeReviewId, int iterationId) 
         {
             return codeReviewClient.GetChangesAsync(teamProjectId, codeReviewId, iterationId).Result;
         }
 
+        // done
         public static Review GetReview(CodeReviewHttpClient codeReviewClient, Guid teamProjectId, int codeReviewId)
         {
             return codeReviewClient.GetReviewAsync(teamProjectId, codeReviewId).Result;
@@ -134,7 +158,7 @@ namespace PsWorkarounds
 }
 "@
     
-    (Add-Type -TypeDefinition $source -ReferencedAssemblies $externalAssemblyPaths) | out-null
+    #(Add-Type -TypeDefinition $source -ReferencedAssemblies $externalAssemblyPaths) | out-null
 }
 
 
@@ -197,7 +221,7 @@ function PostDiscussionThreads
 #
 function FetchActiveDiscussionThreads
 {
-    $threadsDictionary = [PsWorkarounds.Helper]::GetThreadsDictionary($script:discussionClient, $script:artifactUri)
+    $threadsDictionary =  $script:discussionClient.GetThreadsAsync( @($artifactUri) ).Result;
     $threadList = New-Object "System.Collections.Generic.List[$script:discussionWebApiNS.DiscussionThread]"
     
     foreach ($threads in $threadsDictionary.Values)
@@ -226,7 +250,7 @@ function FetchDiscussionComments
     
     foreach ($discussionThread in $discussionThreads)
     {
-        $commentsFromThread = [PsWorkarounds.Helper]::GetComments($script:discussionClient, $discussionThread.DiscussionId)
+        $commentsFromThread = $script:discussionClient.GetCommentsAsync($discussionThread.DiscussionId).Result;
         
         if ($commentsFromThread -ne $null)
         {
@@ -287,10 +311,7 @@ function ThreadMatchesCommentSource
 
 function GetCodeFlowLatestIterationId
 {
-    $review = [PsWorkarounds.Helper]::GetReview(
-        $script:codeReviewClient,
-        $script:pullRequest.Repository.ProjectReference.Id, 
-        $script:pullRequest.CodeReviewId);
+    $review = $script:codeReviewClient.GetReviewAsync($script:pullRequest.Repository.ProjectReference.Id, $script:pullRequest.CodeReviewId).Result;
 
     Assert ($review -ne $null) "Could not retrieve the review"
     Assert (HasElements $review.Iterations) "No iterations found on the review"
@@ -304,11 +325,10 @@ function GetCodeFlowChanges
 {
      param ([int]$iterationId)
      
-     $changes = [PsWorkarounds.Helper]::GetChanges(
-         $script:codeReviewClient, 
+     $changes =  $script:codeReviewClient.GetChangesAsync(
          $script:pullRequest.Repository.ProjectReference.Id, 
          $script:pullRequest.CodeReviewId, 
-         $iterationId);
+         $iterationId).Result;
      
      Write-Verbose "Change count: $($changes.Count)"
      
