@@ -158,3 +158,39 @@ export function assumeNuGetUriPrefixes(collectionUri: string): Q.Promise<string[
 
     return Q(prefixes);
 }
+
+export function getServiceEndPoint(feedId: string, accessToken: string, area: string, locationId: string ): Q.Promise<string>{
+	
+	var collectionUrl = tl.getVariable("System.TeamFoundationCollectionUri");
+	var oauth = vstsWebApi.getBearerHandler(accessToken);
+	var connection = new vstsWebApi.WebApi(collectionUrl, oauth);
+	var coreApi = connection.getCoreApi();
+	var serviceURL = '';
+			
+	return coreApi.vsoClient.getVersioningData("3.0-preview.1", area, locationId,  { feedId: feedId })
+	.then((versioningData) => {
+	    tl._writeLine("Found " + area + " endpoint: " + versioningData.requestUrl);
+		return versioningData.requestUrl;
+
+	})
+	.fail(err => {
+		tl.error(tl.loc("CouldNotFindServiceEndpoint", area));
+		tl.error(err);
+		tl.exit(1);
+		return '';
+
+	})
+}
+
+export function getNuGetEndPoint(feedId: string, accessToken: string): Q.Promise<string>{
+	
+	return getServiceEndPoint(feedId, accessToken, 'nuget', '9D3A4E8E-2F8F-4AE1-ABC2-B461A51CB3B3');
+	
+} 
+
+export function getPermissionEndPoint(feedId: string, accessToken: string): Q.Promise<string>{
+	
+	return getServiceEndPoint(feedId, accessToken, 'packaging', 'BE8C1476-86A7-44ED-B19D-AEC0E9275CD8');
+	
+} 
+

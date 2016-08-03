@@ -87,6 +87,9 @@ declare module 'nuget-task-common/LocationHelpers' {
 	 * Returns a promise so as to provide a drop-in replacement for location-service-based lookup.
 	 */
 	export function assumeNuGetUriPrefixes(collectionUri: string): Q.Promise<string[]>;
+	export function getServiceEndPoint(feedId: string, accessToken: string, area: string, locationId: string): Q.Promise<string>;
+	export function getNuGetEndPoint(feedId: string, accessToken: string): Q.Promise<string>;
+	export function getPermissionEndPoint(feedId: string, accessToken: string): Q.Promise<string>;
 
 }
 declare module 'nuget-task-common/NuGetToolRunner' {
@@ -123,6 +126,7 @@ declare module 'nuget-task-common/NuGetConfigHelper' {
 	    private _nugetConfigPath;
 	    private _authInfo;
 	    private _environmentSettings;
+	    private tempNugetConfigBaseDir;
 	    private tempNugetConfigDir;
 	    private tempNugetConfigFileName;
 	    tempNugetConfigPath: string;

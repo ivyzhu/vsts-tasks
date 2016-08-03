@@ -16,6 +16,7 @@ import * as auth from 'nuget-task-common/Authentication';
 import {NuGetConfigHelper} from 'nuget-task-common/NuGetConfigHelper';
 import * as locationApi from 'nuget-task-common/LocationApi';
 import * as os from 'os';
+import vsts = require('vso-node-api/WebApi');
 
 class PublishOptions {
     constructor(
@@ -41,20 +42,29 @@ filesList.forEach(packageFile => {
 });
 
 var connectedServiceName = tl.getInput('connectedServiceName');
-var internalFeedUri = tl.getInput('feedName');
-var nuGetAdditionalArgs = tl.getInput('nuGetAdditionalArgs');
-var verbosity = tl.getInput('verbosity');
-var preCredProviderNuGet = tl.getBoolInput('preCredProviderNuGet');
-
 var nuGetFeedType = tl.getInput('nuGetFeedType') || "external";
 // make sure the feed type is an expected one
 var normalizedNuGetFeedType = ['internal', 'external'].find(x => nuGetFeedType.toUpperCase() == x.toUpperCase());
 if (!normalizedNuGetFeedType) {
     throw new Error(tl.loc("UnknownFeedType", nuGetFeedType))
 }
-
 nuGetFeedType = normalizedNuGetFeedType;
 
+var internalFeedUri = tl.getInput('feedName');
+var feedId = tl.getInput('targetFeed');
+var isUpgradedToUseFeedList = true;
+// backward compatibility . If the build definition is not upgraded to use feed picklist, use feedName instead. 
+if (nuGetFeedType == "internal" && internalFeedUri != '' && feedId == null) 
+{
+	isUpgradedToUseFeedList = false;
+	
+	var feedName = internalFeedUri.substring(internalFeedUri.indexOf('/packaging/') + '/packaging/'.length, internalFeedUri.indexOf('/nuget/'));
+	tl.warning(tl.loc('TaskUpgrade', feedName));
+}
+
+var nuGetAdditionalArgs = tl.getInput('nuGetAdditionalArgs');
+var verbosity = tl.getInput('verbosity');
+var preCredProviderNuGet = tl.getBoolInput('preCredProviderNuGet');
 var userNuGetPath = tl.getPathInput('nuGetPath', false, true);
 if (!tl.filePathSupplied('nuGetPath')) {
     userNuGetPath = null;
@@ -78,6 +88,17 @@ var accessToken = auth.getSystemAccessToken();
 let buildIdentityDisplayName: string = null;
 let buildIdentityAccount: string = null;
 
+// Get NuGet Endpoint
+var deferred = Q.defer();
+if (nuGetFeedType == "internal" && isUpgradedToUseFeedList)  {
+	locationHelpers.getNuGetEndPoint(feedId, accessToken)
+	.then((nuGetEndpoint) =>
+	{
+		internalFeedUri = nuGetEndpoint;
+		deferred.resolve(internalFeedUri);	
+	});
+}
+
 /*
 BUG: HTTP calls to access the location service currently do not work for customers behind proxies.
 locationHelpers.getNuGetConnectionData(serviceUri, accessToken)
@@ -86,7 +107,13 @@ locationHelpers.getNuGetConnectionData(serviceUri, accessToken)
         buildIdentityAccount = locationHelpers.getIdentityAccount(connectionData.authorizedUser);
 
         tl._writeLine(tl.loc('ConnectingAs', buildIdentityDisplayName, buildIdentityAccount));
+		if (nuGetFeedType == "internal" && isUpgradedToUseFeedList)
+		{
+		  verifyBuildIdentityPermission(feedId, accessToken, buildIdentityAccount, buildIdentityDisplayName);
+		}
+	
         return connectionData;
+		
     })
     .then(locationHelpers.getAllAccessMappingUris)
     .fail(err => {
@@ -122,41 +149,80 @@ locationHelpers.assumeNuGetUriPrefixes(serviceUri)
         var apiKey: string;
         var feedUri: string;
         var credCleanup = () => { return };
-        if (nuGetFeedType == "internal") {
-            if (!credProviderDir || (userNuGetPath && preCredProviderNuGet)) {
-                var nuGetConfigHelper = new NuGetConfigHelper(nuGetPathToUse, null, authInfo, environmentSettings);
-                nuGetConfigHelper.setSources([{ feedName: "internalFeed", feedUri: internalFeedUri }]);
-                configFilePromise = Q(nuGetConfigHelper.tempNugetConfigPath);
-                credCleanup = () => tl.rmRF(nuGetConfigHelper.tempNugetConfigPath, true);
-            }
+	    
+		if (nuGetFeedType == "internal" && isUpgradedToUseFeedList) {
+			Q.allSettled([deferred.promise]).then(() =>{
+				if (!credProviderDir || (userNuGetPath && preCredProviderNuGet)) {
+					var nuGetConfigHelper = new NuGetConfigHelper(nuGetPathToUse, null, authInfo, environmentSettings);
+					nuGetConfigHelper.setSources([{ feedName: "internalFeed", feedUri: internalFeedUri }]);
+					configFilePromise = Q(nuGetConfigHelper.tempNugetConfigPath);
+					credCleanup = () => tl.rmRF(nuGetConfigHelper.tempNugetConfigPath, true);
+				}
 
-            apiKey = "VSTS";
-            feedUri = internalFeedUri;
-        }
-        else {
-            feedUri = tl.getEndpointUrl(connectedServiceName, false);
-            var externalAuth = tl.getEndpointAuthorization(connectedServiceName, false);
-            apiKey = externalAuth.parameters['password'];
-        }
+				apiKey = "VSTS";
+				feedUri = internalFeedUri;
 
-        return configFilePromise.then(configFile => {
-            var publishOptions = new PublishOptions(
-                nuGetPathToUse,
-                feedUri,
-                apiKey,
-                configFile,
-                verbosity,
-                nuGetAdditionalArgs,
-                environmentSettings);
+				return configFilePromise.then(configFile => {
+					var publishOptions = new PublishOptions(
+						nuGetPathToUse,
+						feedUri,
+						apiKey,
+						configFile,
+						verbosity,
+					nuGetAdditionalArgs,
+					environmentSettings);
 
-            var result = Q({});
-            filesList.forEach((solutionFile) => {
-                result = result.then(() => {
-                    return publishPackage(solutionFile, publishOptions);
-                })
-            })
-            return result.fin(credCleanup);
-        })
+					var result = Q({});
+					filesList.forEach((solutionFile) => {
+						result = result.then(() => {
+							return publishPackage(solutionFile, publishOptions);
+						})
+					})
+					return result.fin(credCleanup);
+				});
+			});
+		}
+		
+		// if NuGetType is external or build task is not upgraded to use feed picklist, use internalFeedUri directly. 
+		if (nuGetFeedType == "external" || (nuGetFeedType == "internal" && !isUpgradedToUseFeedList)) {
+			
+			if (nuGetFeedType == "internal") {
+				if (!credProviderDir || (userNuGetPath && preCredProviderNuGet)) {
+					var nuGetConfigHelper = new NuGetConfigHelper(nuGetPathToUse, null, authInfo, environmentSettings);
+					nuGetConfigHelper.setSources([{ feedName: "internalFeed", feedUri: internalFeedUri }]);
+					configFilePromise = Q(nuGetConfigHelper.tempNugetConfigPath);
+					credCleanup = () => tl.rmRF(nuGetConfigHelper.tempNugetConfigPath, true);
+				}
+
+				apiKey = "VSTS";
+				feedUri = internalFeedUri;
+			}
+			else {
+				feedUri = tl.getEndpointUrl(connectedServiceName, false);
+				var externalAuth = tl.getEndpointAuthorization(connectedServiceName, false);
+				apiKey = externalAuth.parameters['password'];
+			}
+
+			return configFilePromise.then(configFile => {
+				var publishOptions = new PublishOptions(
+					nuGetPathToUse,
+					feedUri,
+					apiKey,
+					configFile,
+					verbosity,
+				nuGetAdditionalArgs,
+				environmentSettings);
+
+				var result = Q({});
+				filesList.forEach((solutionFile) => {
+					result = result.then(() => {
+						return publishPackage(solutionFile, publishOptions);
+					})
+				})
+				return result.fin(credCleanup);
+			});
+		}	
+			
     })
     .then(() => {
         tl._writeLine(tl.loc('PackagesInstalledSuccessfully'));
@@ -205,4 +271,46 @@ function publishPackage(packageFile: string, options: PublishOptions): Q.Promise
     }
 
     return nugetTool.exec();
+}
+
+function verifyBuildIdentityPermission(feedId: string, accessToken: string, buildIdentityAccount: string, buildIdentityDisplayName: string)
+{
+	locationHelpers.getPermissionEndPoint(feedId, accessToken)
+	.then((permissionEndpoint) =>
+	{
+		var permissionUri = permissionEndpoint;
+		var collectionUrl = tl.getVariable("System.TeamFoundationCollectionUri");
+		var oauth = vsts.getBearerHandler(accessToken);
+		var connection = new vsts.WebApi(collectionUrl, oauth);
+		var coreApi = connection.getCoreApi();
+		var hasPermission = false;
+		
+		coreApi.restClient.getJson(permissionUri, null, null, null, (error, status, result) => {
+			if (status != 200)
+			{
+				tl.error(error);
+				tl.exit(1);
+			}
+		
+			var permissions = result.value;
+			for (var perm in permissions) {
+
+				if ( !hasPermission && (permissions[perm].role == "administrator" || permissions[perm].role == "contributor" ))
+				{
+					if (permissions[perm].identityDescriptor.indexOf(buildIdentityAccount) > 0 )
+					{										
+						hasPermission = true;
+						break;
+					}
+					
+				} 	
+			}
+		
+			if (!hasPermission)
+			{
+				tl.error(tl.loc("NoBuildIdentityPermission", buildIdentityDisplayName));
+				tl.exit(1);
+			}
+    });
+});
 }

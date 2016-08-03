@@ -9,7 +9,7 @@
   "version": {
     "Major": 0,
     "Minor": 2,
-    "Patch": 5
+    "Patch": 6
   },
   "demands": [
     "Cmd"
@@ -37,10 +37,10 @@
       "type": "radio",
       "label": "ms-resource:loc.input.label.nuGetFeedType",
       "required": true,
-      "defaultValue": "external",
+      "defaultValue": "internal",
       "options": {
-        "external": "External NuGet Feed",
-        "internal": "Internal NuGet Feed"
+        "internal": "Feed in this account",
+        "external": "Feed outside this account"
       }
     },
     {
@@ -56,9 +56,22 @@
       "type": "string",
       "label": "ms-resource:loc.input.label.feedName",
       "defaultValue": "",
-      "required": true,
+      "required": false,
       "helpMarkDown": "ms-resource:loc.input.help.feedName",
       "visibleRule": "nuGetFeedType = internal"
+    },
+    {
+      "name": "targetFeed",
+      "type": "pickList",
+      "label": "ms-resource:loc.input.label.targetFeed",
+      "defaultValue": "",
+      "required": true,
+      "helpMarkDown": "ms-resource:loc.input.help.targetFeed",
+      "visibleRule": "nuGetFeedType = internal",
+      "properties": {
+        "EditableOptions": "True",
+        "DisableManageLink": "True"
+      }
     },
     {
       "name": "nuGetAdditionalArgs",
@@ -103,6 +116,15 @@
       "required": "false"
     }
   ],
+  "dataSourceBindings": [
+    {
+      "target": "targetFeed",
+      "endpointId": "tfs:feed",
+      "endpointUrl": "{{endpoint.url}}/_apis/packaging/feeds?feedRole=contributor",
+      "resultSelector": "jsonpath:$.value[*]",
+      "resultTemplate": "{ \"Value\" : \"{{{id}}}\", \"DisplayValue\" : \"{{{name}}}\" }"
+    }
+  ],
   "execution": {
     "Node": {
       "target": "nugetpublisher.js",
@@ -117,10 +139,13 @@
     "ConnectingAs": "ms-resource:loc.messages.ConnectingAs",
     "LegacyNuGetHint": "ms-resource:loc.messages.LegacyNuGetHint",
     "BuildIdentityPermissionsHint": "ms-resource:loc.messages.BuildIdentityPermissionsHint",
+    "NoBuildIdentityPermission": "ms-resource:loc.messages.NoBuildIdentityPermission",
     "NoCredProviderOnAgent": "ms-resource:loc.messages.NoCredProviderOnAgent",
     "NotARegularFile": "ms-resource:loc.messages.NotARegularFile",
     "UnknownFeedType": "ms-resource:loc.messages.UnknownFeedType",
-    "CouldNotFindNuGetService": "ms-resource:loc.messages.CouldNotFindNuGetService",
+    "CouldNotFindServiceEndpoint": "ms-resource:loc.messages.CouldNotFindServiceEndpoint",
+    "TaskUpgrade": "ms-resource:loc.messages.TaskUpgrade",
+    "CouldNotFindNuGetEndpoint": "ms-resource:loc.messages.CouldNotFindNuGetEndpoint",
     "NGCommon_IgnoringNuGetExtensionsPath": "ms-resource:loc.messages.NGCommon_IgnoringNuGetExtensionsPath",
     "NGCommon_DetectedNuGetExtensionsPath": "ms-resource:loc.messages.NGCommon_DetectedNuGetExtensionsPath",
     "NGCommon_UnableToFindTool": "ms-resource:loc.messages.NGCommon_UnableToFindTool",
