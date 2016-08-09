@@ -3,7 +3,7 @@
     "name": "JenkinsQueueJob",
     "friendlyName": "Jenkins Queue Job",
     "description": "Queue a job on a Jenkins server",
-    "helpMarkDown": "Queue a job on a [Jenkins](https://jenkins.io/) server.  [More Information](http://go.microsoft.com/fwlink/?LinkId=816956).",
+    "helpMarkDown": "This step queues a job on a [Jenkins](https://jenkins.io/) server. Full integration capabilities require installation of the [Team Foundation Server Plugin](https://wiki.jenkins-ci.org/display/JENKINS/Team+Foundation+Server+Plugin) on Jenkins. [More Information](http://go.microsoft.com/fwlink/?LinkId=816956).",
     "category": "Build",
     "visibility": [
         "Build",
@@ -14,7 +14,7 @@
     "version": {
         "Major": 1,
         "Minor": 0,
-        "Patch": 3
+        "Patch": 5
     },
     "groups": [
         {
@@ -80,7 +80,16 @@
             "resizable": "true",
             "rows" : "4"
         }
-      }
+      },
+      {
+        "name": "trustSSL",
+        "type": "boolean",
+        "label": "Trust server certificate",
+        "defaultValue": "false",
+        "required": false,
+        "helpMarkDown": "Selecting this option results in the Jenkins server's SSL certificate being trusted even if it is self-signed or cannot be validated by a Certificate Authority (CA).",
+        "groupName": "advanced"
+	    }
     ],
     "execution": {
         "Node": {
